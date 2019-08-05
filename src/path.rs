@@ -1,83 +1,54 @@
 use crate::parameters::RouteParameters;
 use std::collections::HashMap;
+use std::str::Chars;
 
 /// Represents a path in HTTP sense (starting from `/`)
 /// This path is internal to the crate, and encapsulates the path matching
 /// logic of a route.
 #[derive(Debug)]
-pub(crate) enum Path {
-    Static(String),
-    Parametric(Vec<String>),
+pub(crate) struct Path {
+    path: String,
 }
 
 impl Path {
     pub fn new(path: &str) -> Path {
-        if is_parametric_path(path) {
-            Path::Parametric(path.split('/').map(|s| s.to_owned()).collect())
-        } else {
-            Path::Static(path.to_owned())
+        Path {
+            path: path.to_string(),
         }
     }
 
     pub fn matches(&self, other_path: &str) -> Option<RouteParameters> {
-        match self {
-            Path::Static(me) => {
-                if me == other_path {
-                    Some(RouteParameters::none())
-                } else {
-                    None
+        // create two pointers to each of the path strings.
+        let mut self_chars = self.path.chars();
+        let mut path_chars = other_path.chars();
+        let mut params: HashMap<String, String> = HashMap::new();
+        loop {
+            let self_char = self_chars.next();
+            let path_char = path_chars.next();
+            match (self_char, path_char) {
+                (Some(s), Some(p)) if s == ':' => {
+                    // capture the current fragment
+                    let (key, value) = capture_route_parameter(&mut self_chars, &mut path_chars);
+                    let v = format!("{}{}", p, value);
+                    params.insert(key, v);
                 }
-            }
-            Path::Parametric(self_path) => {
-                let mut params = HashMap::new();
-                let mut self_segments = self_path.iter();
-                let mut other_segments = other_path.split('/');
-
-                loop {
-                    let self_seg = self_segments.next();
-                    let other_seg = other_segments.next();
-
-                    match (self_seg, other_seg) {
-                        // We have two segments to compare.
-                        (Some(left), Some(right)) => {
-                            let mut self_chars = left.chars();
-                            let first_self_char = self_chars.nth(0);
-                            match first_self_char {
-                                Some(ch) if ch == ':' => {
-                                    let key: String = self_chars.collect();
-                                    params.insert(key, right.to_string());
-                                }
-                                _ => {
-                                    if left != right {
-                                        return None;
-                                    }
-                                }
-                            };
-                        }
-
-                        // We're out of segments to compare, so it's a match.
-                        (None, None) => {
-                            return Some(RouteParameters::new(params));
-                        }
-
-                        // We have 1 Some and 1 None, meaning the route can't be a match
-                        _ => {
-                            return None;
-                        }
-                    }
+                (Some(s), Some(p)) if s != ':' && s != p => {
+                    return None;
                 }
+                (None, None) => {
+                    break;
+                }
+                _ => {}
             }
         }
+        Some(RouteParameters::new(params))
     }
 }
 
-fn is_parametric_path(path: &str) -> bool {
-    for ch in path.chars() {
-        if ch == ':' {
-            return true;
-        }
-    }
-    return false;
+fn capture_route_parameter(route: &mut Chars, path: &mut Chars) -> (String, String) {
+    let key: String = route.take_while(|c| c != &'/').collect();
+    let value: String = path.take_while(|c| c != &'/').collect();
+    (key, value)
 }
 
 // We only impl PartialEq for Path when we're compiling in test configuration so
@@ -85,43 +56,13 @@ fn is_parametric_path(path: &str) -> bool {
 #[cfg(test)]
 impl PartialEq for Path {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Path::Static(self_str), Path::Static(other_str)) => {
-                return self_str == other_str;
-            }
-            (Path::Parametric(self_vec), Path::Parametric(other_vec)) => {
-                if self_vec.len() != other_vec.len() {
-                    return false;
-                }
-                for (a, b) in self_vec.iter().zip(other_vec.iter()) {
-                    if a != b {
-                        return false;
-                    }
-                }
-                true
-            }
-            _ => false,
-        }
+        self.path == other.path
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_parametric_path_on_static_paths() {
-        assert_eq!(is_parametric_path("/foo"), false);
-        assert_eq!(is_parametric_path("/foo/bar"), false);
-        assert_eq!(is_parametric_path("/foo/bar/baz"), false);
-    }
-
-    #[test]
-    fn test_is_parametric_path_on_parametric_paths() {
-        assert_eq!(is_parametric_path("/foo/:id"), true);
-        assert_eq!(is_parametric_path("/foo/:id/bar/baz"), true);
-        assert_eq!(is_parametric_path("/foo/:foo_id/bar/:bar_id"), true);
-    }
 
     #[test]
     fn test_static_path_matches_path() {
@@ -251,5 +192,14 @@ mod tests {
         let path = Path::new("/:path");
         let matches = path.matches("/home/user/file.text");
         assert_eq!(matches.is_none(), true);
+    }
+
+    #[test]
+    fn test_capture_route_parameters() {
+        let mut route = "id/friends/:other_id".chars();
+        let mut url = "123/friends/555".chars();
+        let (key, value) = capture_route_parameter(&mut route, &mut url);
+        assert_eq!(key, "id");
+        assert_eq!(value, "123");
     }
 }
