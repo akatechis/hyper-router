@@ -18,27 +18,30 @@ impl Path {
     }
 
     pub fn matches(&self, other_path: &str) -> Option<RouteParameters> {
-        // create two pointers to each of the path strings.
+        // create two iterators over each of the path strings.
         let mut self_chars = self.path.chars();
         let mut path_chars = other_path.chars();
         let mut params: HashMap<String, String> = HashMap::new();
         loop {
             let self_char = self_chars.next();
             let path_char = path_chars.next();
-            match (self_char, path_char) {
-                (Some(s), Some(p)) if s == ':' => {
-                    // capture the current fragment
+            if self_char.is_some() && path_char.is_some() {
+                let s = self_char.unwrap();
+                let p = path_char.unwrap();
+                if s == ':' {
                     let (key, value) = capture_route_parameter(&mut self_chars, &mut path_chars);
                     let v = format!("{}{}", p, value);
                     params.insert(key, v);
-                }
-                (Some(s), Some(p)) if s != ':' && s != p => {
+                } else if s != ':' && s != p {
                     return None;
                 }
-                (None, None) => {
-                    break;
-                }
-                _ => {}
+            }
+            if (self_char.is_some() && path_char.is_none()) ||
+                (self_char.is_none() && path_char.is_some()) {
+                return None;
+            }
+            if self_char.is_none() && path_char.is_none() {
+                break;
             }
         }
         Some(RouteParameters::new(params))
@@ -201,5 +204,7 @@ mod tests {
         let (key, value) = capture_route_parameter(&mut route, &mut url);
         assert_eq!(key, "id");
         assert_eq!(value, "123");
+        assert_eq!(route.next(), Some('f'));
+        assert_eq!(url.next(), Some('f'));
     }
 }
